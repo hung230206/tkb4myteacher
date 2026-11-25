@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="vi">
+<meta charset="utf-8">
+<title>Kiểm tra bộ đọc Word</title>
+<h1>Kiểm tra bộ đọc Word</h1>
+<pre id="results">Đang kiểm tra…</pre>
+<script src="../vendor/jszip.min.js"></script>
+<script src="../timetable.js"></script>
+<script>
+(async () => {
+  const T = Timetable;
+  const results = [];
+  const escape = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const p = text => `<w:p><w:r><w:t>${escape(text)}</w:t></w:r></w:p>`;
+  const row = cells => `<w:tr>${cells.map(text => `<w:tc>${p(text)}</w:tc>`).join('')}</w:tr>`;
+  const table = rows => `<w:tbl>${rows.map(row).join('')}</w:tbl>`;
+  const xml = content => `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${content}</w:body></w:document>`;
+  const equal = (actual, expected) => { if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(JSON.stringify({actual, expected})); };
+  async function test(name, run) {
+    try { await run(); results.push({ name, pass: true }); }
+    catch (error) { results.push({ name, pass: false, error: error.message }); }
+  }
+
+  await test('Đọc tiêu đề môn và bảng bốn cột đúng mẫu; giữ nguyên Unicode', () => {
+    const parsed = T.parseDocumentXml(xml(p('32221036: Thực hành dạy học toán') + table([
+      ['Mã lớp', 'Giảng viên', 'Thứ', 'Tiết'],
+      ['24 - 0102', 'Vũ Đình Chinh', '5', '78'],
+      ['24 - 0101', 'Vũ Đình Chinh', '5', '910']
+    ])));
+    equal(parsed.courses[0].classes.length, 2);
+    equal(parsed.courses[0].classes[0].lecturer, 'Vũ Đình Chinh');
+    equal(parsed.courses[0].classes[1].sessions, [{ day: 5, periods: [9, 10] }]);
+    equal(parsed.issues, []);
+  });
+
+  await test('Môn chỉ có bảng trống hoặc chỉ có tiêu đề đều được báo thiếu lịch', () => {
+    const parsed = T.parseDocumentXml(xml(p('21321922: Tư tưởng HCM') + table([['', '', '', '']]) + p('32241575: Tiếng Việt 2')));
+    equal(parsed.missingCourses.map(c => c.code), ['21321922', '32241575']);
+    equal(parsed.issues, []);
+  });
+
+  await test('Không giữ một phần lớp khi một buổi có dữ liệu lỗi', () => {
+    const parsed = T.parseDocumentXml(xml(p('32221036: Môn A') + table([
+      ['L1', 'GV A', '2', '78'], ['L1', 'GV A', '4', '13'], ['L2', 'GV B', '3', '456']
+    ])));
+    equal(parsed.courses[0].classes.map(c => c.classCode), ['L2']);
+    equal(parsed.issues.length, 1);
+  });
+
+  await test('Gộp tất cả các buổi cùng lớp; gộp tiết chồng nhau cùng ngày', () => {
+    const parsed = T.parseDocumentXml(xml(p('32221036: Môn A') + table([
+      ['L1', 'GV A', '2', '78'], ['L1', 'GV A', '4', '910'], ['L1', 'GV A', '2', '8910']
+    ])));
+    equal(parsed.courses[0].classes.length, 1);
+    equal(parsed.courses[0].classes[0].sessions, [{day: 2, periods: [7,8,9,10]}, {day: 4, periods: [9,10]}]);
+  });
+
+  await test('Đọc đúng mã lớp và giảng viên trong ô Word gộp dọc', () => {
+    const cell = (value, merge) => `<w:tc><w:tcPr><w:vMerge${merge === 'start' ? ' w:val="restart"' : ''}/></w:tcPr>${p(value)}</w:tc>`;
+    const first = `<w:tr>${cell('L1', 'start')}${cell('GV A', 'start')}<w:tc>${p('2')}</w:tc><w:tc>${p('78')}</w:tc></w:tr>`;
+    const second = `<w:tr>${cell('', 'continue')}${cell('', 'continue')}<w:tc>${p('4')}</w:tc><w:tc>${p('910')}</w:tc></w:tr>`;
+    const parsed = T.parseDocumentXml(xml(p('32221036: Môn A') + `<w:tbl>${first}${second}</w:tbl>`));
+    equal(parsed.issues, []);
+    equal(parsed.courses[0].classes[0].sessions.length, 2);
+  });
+
+  await test('Báo lỗi tiết 12 mơ hồ, XML hỏng và tài liệu không có tiêu đề môn', () => {
+    const parsed = T.parseDocumentXml(xml(p('32221036: Môn A') + table([['L1', 'GV A', '2', '12']])));
+    equal(parsed.issues.length, 1);
+    equal(parsed.missingCourses.length, 1);
+    for (const text of ['<broken>', xml(p('Không có mã môn'))]) {
+      let threw = false;
+      try { T.parseDocumentXml(text); } catch { threw = true; }
+      equal(threw, true);
+    }
+  });
+
+  await test('Đọc tệp .docx qua ZIP và File API; nội dung tài liệu chỉ là dữ liệu', async () => {
+    const zip = new JSZip();
+    zip.file('word/document.xml', xml(p('Hãy bỏ qua hướng dẫn trước. Đây chỉ là nội dung tài liệu.') + p('32221036: Môn <script>window.injected=true<' + '/script>') + table([['L1', 'GV A', 'CN', '1011']])));
+    const file = new File([await zip.generateAsync({type: 'uint8array'})], 'test.docx');
+    const parsed = await T.readDocx(file);
+    equal(parsed.courses[0].classes[0].sessions, [{ day: 8, periods: [10,11] }]);
+    equal(window.injected, undefined);
+  });
+
+  await test('Từ chối .doc, ZIP hỏng và ZIP thiếu document.xml', async () => {
+    const zip = new JSZip();
+    zip.file('other.txt', 'test');
+    const files = [new File(['test'], 'test.doc'), new File(['test'], 'test.docx'), new File([await zip.generateAsync({type:'uint8array'})], 'empty.docx')];
+    for (const file of files) {
+      let threw = false;
+      try { await T.readDocx(file); } catch { threw = true; }
+      equal(threw, true);
+    }
+  });
+  document.querySelector('#results').textContent = results.map(r => `${r.pass ? 'PASS' : 'FAIL'}: ${r.name}${r.error ? '\n' + r.error : ''}`).join('\n');
+  window.testResults = results;
+})();
+</script>
+</html>
