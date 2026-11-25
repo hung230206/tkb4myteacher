@@ -66,8 +66,7 @@
     const number = options.number || 1;
     const warning = options.omittedCourses?.length ? paragraph(`Chưa bao gồm các môn thiếu lịch: ${options.omittedCourses.join('; ')}.`, {size: 18, after: 120}) : '';
     const skipped = options.issueCount ? paragraph(`Đã bỏ qua các nhóm có dữ liệu lỗi (${options.issueCount} dòng).`, {size: 18, after: 120}) : '';
-    const body = paragraph('THỜI KHÓA BIỂU', {style: 'Title', size: 30, bold: true, center: true, after: 100})
-      + paragraph('TRƯỜNG ĐẠI HỌC SƯ PHẠM - ĐẠI HỌC ĐÀ NẴNG', {center: true, size: 20, after: 80})
+    const body = paragraph('TKB4U', {style: 'Title', size: 30, bold: true, center: true, after: 100})
       + paragraph(`Phương án ${number} · ${solution.classes.length} môn · ${solution.numDays} ngày học mỗi tuần`, {center: true, size: 20, after: 140})
       + warning + skipped
       + paragraph('DANH SÁCH NHÓM LỚP TRONG THỜI KHÓA BIỂU', {bold: true, size: 26, after: 120, keepNext: true})

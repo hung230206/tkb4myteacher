@@ -1,4 +1,4 @@
-# Xếp thời khóa biểu từ Word
+# TKB4U
 
 Ứng dụng đọc danh sách nhóm lớp từ tệp Word, chọn một nhóm cho mỗi môn và tìm các tổ hợp không trùng thứ/tiết. Các phương án tìm được được xếp theo số ngày đến trường tăng dần.
 
